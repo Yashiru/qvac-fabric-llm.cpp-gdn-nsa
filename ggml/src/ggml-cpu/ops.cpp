@@ -13356,3 +13356,202 @@ void ggml_compute_forward_lightning_indexer(
         }
     }
 }
+
+// ggml_compute_forward_nsa_cmp
+
+void ggml_compute_forward_nsa_cmp(
+        const ggml_compute_params * params,
+        ggml_tensor * dst) {
+
+    const ggml_tensor * q   = dst->src[0];
+    const ggml_tensor * kc  = dst->src[1];
+    const ggml_tensor * vc  = dst->src[2];
+    const ggml_tensor * pos = dst->src[3];
+
+    const int   bs    = ggml_get_op_params_i32(dst, 0);
+    const float scale = ggml_get_op_params_f32(dst, 1);
+
+    const int64_t D         = q->ne[0];
+    const int64_t n_head    = q->ne[1];
+    const int64_t n_tokens  = q->ne[2];
+    const int64_t n_head_kv = kc->ne[1];
+    const int64_t n_blk     = kc->ne[2];
+    const int64_t G         = n_head/n_head_kv;
+
+    float * o_cmp  = (float *) dst->data;
+    float * scores = o_cmp + D*n_head*n_tokens;
+
+    // one row = one (token, kv head), so the sum over the q heads of the group stays in one thread
+    const int64_t n_rows = n_tokens*n_head_kv;
+    const int64_t dr  = (n_rows + params->nth - 1)/params->nth;
+    const int64_t ir0 = dr*params->ith;
+    const int64_t ir1 = std::min(ir0 + dr, n_rows);
+
+    float * p = (float *) params->wdata + (n_blk + CACHE_LINE_SIZE_F32)*params->ith;
+
+    for (int64_t ir = ir0; ir < ir1; ++ir) {
+        const int64_t i  = ir/n_head_kv;
+        const int64_t hk = ir%n_head_kv;
+
+        const int32_t t     = ((const int32_t *) pos->data)[i];
+        const int64_t ic    = t/bs;
+        const int64_t n_vis = std::min<int64_t>((t + 1)/bs, n_blk);
+
+        float * sc = scores + (i*n_head_kv + hk)*n_blk;
+        for (int64_t c = 0; c < n_blk; ++c) {
+            sc[c] = 0.0f;
+        }
+
+        for (int64_t g = 0; g < G; ++g) {
+            const int64_t h = hk*G + g;
+
+            const float * qh = (const float *) ((const char *) q->data + i*q->nb[2] + h*q->nb[1]);
+            float       * oh = o_cmp + (i*n_head + h)*D;
+
+            for (int64_t d = 0; d < D; ++d) {
+                oh[d] = 0.0f;
+            }
+            if (n_vis == 0) {
+                continue;
+            }
+
+            float max = -INFINITY;
+            for (int64_t c = 0; c < n_vis; ++c) {
+                const float * kh = (const float *) ((const char *) kc->data + c*kc->nb[2] + hk*kc->nb[1]);
+                ggml_vec_dot_f32(D, &p[c], 0, qh, 0, kh, 0, 1);
+                p[c] *= scale;
+                max = std::max(max, p[c]);
+            }
+
+            float sum = 0.0f;
+            for (int64_t c = 0; c < n_vis; ++c) {
+                p[c] = expf(p[c] - max);
+                sum += p[c];
+            }
+
+            for (int64_t c = 0; c < n_vis; ++c) {
+                p[c] /= sum;
+                sc[c] += p[c];
+                const float * vh = (const float *) ((const char *) vc->data + c*vc->nb[2] + hk*vc->nb[1]);
+                ggml_vec_mad_f32(D, oh, vh, p[c]);
+            }
+        }
+
+        for (int64_t c = 0; c < n_blk; ++c) {
+            if (c == 0 || c == ic || c == ic - 1) {
+                sc[c] = INFINITY;
+            } else if (c >= n_vis) {
+                sc[c] = -INFINITY;
+            }
+        }
+    }
+}
+
+// ggml_compute_forward_nsa_sel
+
+// online softmax over the keys [j0, j1) of kv head hk, accumulated into (m, s, acc)
+static void ggml_nsa_sel_range(
+        const ggml_tensor * k, const ggml_tensor * v, int64_t hk, const float * qh, float scale,
+        int64_t j0, int64_t j1, float & m, float & s, float * acc, float * tmp) {
+    const int64_t D = k->ne[0];
+
+    for (int64_t j = j0; j < j1; ++j) {
+        const char * kr = (const char *) k->data + j*k->nb[2] + hk*k->nb[1];
+        const char * vr = (const char *) v->data + j*v->nb[2] + hk*v->nb[1];
+
+        float score;
+        if (k->type == GGML_TYPE_F16) {
+            ggml_cpu_fp16_to_fp32((const ggml_fp16_t *) kr, tmp, D);
+            ggml_vec_dot_f32(D, &score, 0, qh, 0, tmp, 0, 1);
+        } else {
+            ggml_vec_dot_f32(D, &score, 0, qh, 0, (const float *) kr, 0, 1);
+        }
+        score *= scale;
+
+        if (score > m) {
+            const float c = expf(m - score);
+            ggml_vec_scale_f32(D, acc, c);
+            s *= c;
+            m  = score;
+        }
+        const float w = expf(score - m);
+        s += w;
+
+        if (v->type == GGML_TYPE_F16) {
+            ggml_cpu_fp16_to_fp32((const ggml_fp16_t *) vr, tmp, D);
+            ggml_vec_mad_f32(D, acc, tmp, w);
+        } else {
+            ggml_vec_mad_f32(D, acc, (const float *) vr, w);
+        }
+    }
+}
+
+void ggml_compute_forward_nsa_sel(
+        const ggml_compute_params * params,
+        ggml_tensor * dst) {
+
+    const ggml_tensor * q   = dst->src[0];
+    const ggml_tensor * k   = dst->src[1];
+    const ggml_tensor * v   = dst->src[2];
+    const ggml_tensor * idx = dst->src[3];
+    const ggml_tensor * pos = dst->src[4];
+
+    const int   bs     = ggml_get_op_params_i32(dst, 0);
+    const int   window = ggml_get_op_params_i32(dst, 1);
+    const float scale  = ggml_get_op_params_f32(dst, 2);
+
+    const int64_t D         = q->ne[0];
+    const int64_t n_head    = q->ne[1];
+    const int64_t n_tokens  = q->ne[2];
+    const int64_t n_head_kv = k->ne[1];
+    const int64_t n_kv      = k->ne[2];
+    const int64_t n_sel     = idx->ne[0];
+    const int64_t G         = n_head/n_head_kv;
+
+    // one row = one (token, q head)
+    const int64_t n_rows = n_tokens*n_head;
+    const int64_t dr  = (n_rows + params->nth - 1)/params->nth;
+    const int64_t ir0 = dr*params->ith;
+    const int64_t ir1 = std::min(ir0 + dr, n_rows);
+
+    float * acc = (float *) params->wdata + (2*D + CACHE_LINE_SIZE_F32)*params->ith;
+    float * tmp = acc + D;
+
+    for (int64_t ir = ir0; ir < ir1; ++ir) {
+        const int64_t i  = ir/n_head;
+        const int64_t h  = ir%n_head;
+        const int64_t hk = h/G;
+
+        const int64_t t  = ((const int32_t *) pos->data)[i];
+        const int64_t je = std::min(t + 1, n_kv);
+
+        const float   * qh = (const float *) ((const char *) q->data + i*q->nb[2] + h*q->nb[1]);
+        const int32_t * bi = (const int32_t *) ((const char *) idx->data + i*idx->nb[2] + hk*idx->nb[1]);
+
+        for (int plane = 0; plane < 2; ++plane) {
+            float m = -INFINITY;
+            float s = 0.0f;
+            for (int64_t d = 0; d < D; ++d) {
+                acc[d] = 0.0f;
+            }
+
+            if (plane == 0) {
+                for (int64_t is = 0; is < n_sel; ++is) {
+                    if (bi[is] < 0) {
+                        continue;
+                    }
+                    const int64_t j0 = (int64_t) bi[is]*bs;
+                    ggml_nsa_sel_range(k, v, hk, qh, scale, j0, std::min(j0 + bs, je), m, s, acc, tmp);
+                }
+            } else {
+                ggml_nsa_sel_range(k, v, hk, qh, scale, std::max<int64_t>(0, t - window + 1), je, m, s, acc, tmp);
+            }
+
+            float * o = (float *) ((char *) dst->data + plane*dst->nb[3] + i*dst->nb[2] + h*dst->nb[1]);
+            const float inv = s > 0.0f ? 1.0f/s : 0.0f;
+            for (int64_t d = 0; d < D; ++d) {
+                o[d] = acc[d]*inv;
+            }
+        }
+    }
+}

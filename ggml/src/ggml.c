@@ -1154,6 +1154,8 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "GATED_DELTA_NET",
     "GATED_DELTA_NET_BACK",
     "LIGHTNING_INDEXER",
+    "NSA_CMP",
+    "NSA_SEL",
     "DSV4_HC_COMB",
     "DSV4_HC_PRE",
     "DSV4_HC_POST",
@@ -1176,7 +1178,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "GLU",
 };
 
-static_assert(GGML_OP_COUNT == 113, "GGML_OP_COUNT != 113");
+static_assert(GGML_OP_COUNT == 115, "GGML_OP_COUNT != 115");
 
 static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "none",
@@ -1281,6 +1283,8 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "gated_delta_net(q, k, v, g, beta, s)",
     "gated_delta_net_back(q, k, v, g, beta, s, d)",
     "lightning_indexer(q, k, weights, mask)",
+    "nsa_cmp(q, k_cmp, v_cmp, pos)",
+    "nsa_sel(q, k, v, idx, pos)",
     "dsv4_hc_comb(mixes, scale, base)",
     "dsv4_hc_pre(x, weights)",
     "dsv4_hc_post(x, residual, post, comb)",
@@ -1303,7 +1307,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "glu(x)",
 };
 
-static_assert(GGML_OP_COUNT == 113, "GGML_OP_COUNT != 113");
+static_assert(GGML_OP_COUNT == 115, "GGML_OP_COUNT != 115");
 
 static_assert(GGML_OP_POOL_COUNT == 2, "GGML_OP_POOL_COUNT != 2");
 
@@ -6734,6 +6738,95 @@ struct ggml_tensor * ggml_lightning_indexer(
     result->src[1] = k;
     result->src[2] = weights;
     result->src[3] = mask;
+
+    return result;
+}
+
+// ggml_nsa_cmp
+
+struct ggml_tensor * ggml_nsa_cmp(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * q,
+        struct ggml_tensor  * k_cmp,
+        struct ggml_tensor  * v_cmp,
+        struct ggml_tensor  * pos,
+        int                   block_size,
+        float                 scale) {
+    GGML_ASSERT(q->type     == GGML_TYPE_F32);
+    GGML_ASSERT(k_cmp->type == GGML_TYPE_F32);
+    GGML_ASSERT(v_cmp->type == GGML_TYPE_F32);
+    GGML_ASSERT(pos->type   == GGML_TYPE_I32);
+    GGML_ASSERT(ggml_is_contiguous_rows(q));
+    GGML_ASSERT(ggml_is_contiguous_rows(k_cmp));
+    GGML_ASSERT(ggml_is_contiguous_rows(v_cmp));
+    GGML_ASSERT(ggml_are_same_shape(k_cmp, v_cmp));
+    GGML_ASSERT(k_cmp->ne[0] == q->ne[0]);
+    GGML_ASSERT(q->ne[1] % k_cmp->ne[1] == 0);
+    GGML_ASSERT(q->ne[3] == 1 && k_cmp->ne[3] == 1);
+    GGML_ASSERT(pos->ne[0] == q->ne[2]);
+    GGML_ASSERT(block_size > 0);
+
+    const int64_t D         = q->ne[0];
+    const int64_t n_head    = q->ne[1];
+    const int64_t n_tokens  = q->ne[2];
+    const int64_t n_head_kv = k_cmp->ne[1];
+    const int64_t n_blk     = k_cmp->ne[2];
+
+    struct ggml_tensor * result = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, (D*n_head + n_blk*n_head_kv)*n_tokens);
+
+    ggml_set_op_params_i32(result, 0, block_size);
+    ggml_set_op_params_f32(result, 1, scale);
+
+    result->op     = GGML_OP_NSA_CMP;
+    result->src[0] = q;
+    result->src[1] = k_cmp;
+    result->src[2] = v_cmp;
+    result->src[3] = pos;
+
+    return result;
+}
+
+// ggml_nsa_sel
+
+struct ggml_tensor * ggml_nsa_sel(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * q,
+        struct ggml_tensor  * k,
+        struct ggml_tensor  * v,
+        struct ggml_tensor  * idx,
+        struct ggml_tensor  * pos,
+        int                   block_size,
+        int                   window,
+        float                 scale) {
+    GGML_ASSERT(q->type == GGML_TYPE_F32);
+    GGML_ASSERT(k->type == GGML_TYPE_F32 || k->type == GGML_TYPE_F16);
+    GGML_ASSERT(v->type == GGML_TYPE_F32 || v->type == GGML_TYPE_F16);
+    GGML_ASSERT(idx->type == GGML_TYPE_I32);
+    GGML_ASSERT(pos->type == GGML_TYPE_I32);
+    GGML_ASSERT(ggml_is_contiguous_rows(q));
+    GGML_ASSERT(ggml_is_contiguous_rows(k));
+    GGML_ASSERT(ggml_is_contiguous_rows(v));
+    GGML_ASSERT(ggml_is_contiguous(idx));
+    GGML_ASSERT(k->ne[0] == q->ne[0] && v->ne[0] == q->ne[0]);
+    GGML_ASSERT(v->ne[1] == k->ne[1] && v->ne[2] == k->ne[2]);
+    GGML_ASSERT(q->ne[1] % k->ne[1] == 0);
+    GGML_ASSERT(idx->ne[1] == k->ne[1] && idx->ne[2] == q->ne[2]);
+    GGML_ASSERT(q->ne[3] == 1 && k->ne[3] == 1 && v->ne[3] == 1);
+    GGML_ASSERT(pos->ne[0] == q->ne[2]);
+    GGML_ASSERT(block_size > 0 && window > 0);
+
+    struct ggml_tensor * result = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, q->ne[0], q->ne[1], q->ne[2], 2);
+
+    ggml_set_op_params_i32(result, 0, block_size);
+    ggml_set_op_params_i32(result, 1, window);
+    ggml_set_op_params_f32(result, 2, scale);
+
+    result->op     = GGML_OP_NSA_SEL;
+    result->src[0] = q;
+    result->src[1] = k;
+    result->src[2] = v;
+    result->src[3] = idx;
+    result->src[4] = pos;
 
     return result;
 }
