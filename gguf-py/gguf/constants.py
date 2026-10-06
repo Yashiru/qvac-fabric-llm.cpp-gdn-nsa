@@ -218,6 +218,11 @@ class Keys:
             LOCAL_BLOCKS = "{arch}.attention.indexer.local_blocks"  # MSA
             TYPES      = "{arch}.attention.indexer.types"
 
+        class NSA:
+            BLOCK_SIZE  = "{arch}.attention.nsa.block_size"
+            BLOCK_COUNT = "{arch}.attention.nsa.block_count"
+            WINDOW_SIZE = "{arch}.attention.nsa.window_size"
+
     class HyperConnection:
         COUNT                = "{arch}.hyper_connection.count"
         SINKHORN_ITERATIONS  = "{arch}.hyper_connection.sinkhorn_iterations"
@@ -610,6 +615,7 @@ class MODEL_ARCH(IntEnum):
     MAINCODER        = auto()
     KIMI_LINEAR      = auto()
     KIMI_K3          = auto()
+    GDN_NSA          = auto()
     TALKIE           = auto()
     MELLUM           = auto()
     NANBEIGE         = auto()
@@ -1346,6 +1352,7 @@ MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
     MODEL_ARCH.MAINCODER:        "maincoder",
     MODEL_ARCH.KIMI_LINEAR:      "kimi-linear",
     MODEL_ARCH.KIMI_K3:          "kimi-k3",
+    MODEL_ARCH.GDN_NSA:          "gdn-nsa",
     MODEL_ARCH.TALKIE:           "talkie",
     MODEL_ARCH.MELLUM:           "mellum",
     MODEL_ARCH.NANBEIGE:         "nanbeige",
@@ -5164,6 +5171,28 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.FFN_GATE_SHEXP,
         MODEL_TENSOR.FFN_DOWN_SHEXP,
         MODEL_TENSOR.FFN_UP_SHEXP,
+    ],
+    MODEL_ARCH.GDN_NSA: [
+        MODEL_TENSOR.TOKEN_EMBD,
+        MODEL_TENSOR.OUTPUT_NORM,
+        MODEL_TENSOR.OUTPUT,
+        MODEL_TENSOR.ATTN_NORM,
+        MODEL_TENSOR.ATTN_Q,
+        MODEL_TENSOR.ATTN_K,
+        MODEL_TENSOR.ATTN_V,
+        MODEL_TENSOR.ATTN_OUT,
+        MODEL_TENSOR.ATTN_GATE,
+        MODEL_TENSOR.ATTN_QKV,
+        MODEL_TENSOR.FFN_NORM,
+        MODEL_TENSOR.FFN_GATE,
+        MODEL_TENSOR.FFN_DOWN,
+        MODEL_TENSOR.FFN_UP,
+        MODEL_TENSOR.SSM_A,
+        MODEL_TENSOR.SSM_CONV1D,
+        MODEL_TENSOR.SSM_DT,
+        MODEL_TENSOR.SSM_NORM,
+        MODEL_TENSOR.SSM_BETA_ALPHA,
+        MODEL_TENSOR.SSM_OUT,
     ],
     MODEL_ARCH.KIMI_K3: [
         MODEL_TENSOR.TOKEN_EMBD,

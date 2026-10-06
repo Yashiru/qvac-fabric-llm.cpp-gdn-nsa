@@ -313,6 +313,8 @@ static llama_model * llama_model_mapping(llm_arch arch, const llama_model_params
             return new llama_model_pangu_embed(params);
         case LLM_ARCH_QWEN3NEXT:
             return new llama_model_qwen3next(params);
+        case LLM_ARCH_GDN_NSA:
+            return new llama_model_gdn_nsa(params);
         case LLM_ARCH_QWEN35:
             return new llama_model_qwen35(params);
         case LLM_ARCH_QWEN35MOE:
@@ -2106,6 +2108,7 @@ void llama_model::print_info() const {
                 arch == LLM_ARCH_PLAMO2 ||
                 arch == LLM_ARCH_GRANITE_HYBRID ||
                 arch == LLM_ARCH_QWEN3NEXT ||
+                arch == LLM_ARCH_GDN_NSA ||
                 arch == LLM_ARCH_QWEN35 ||
                 arch == LLM_ARCH_QWEN35MOE ||
                 arch == LLM_ARCH_NEMOTRON_H ||
@@ -2519,7 +2522,8 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                         filter_recr = [&](uint32_t il) {
                             return hparams.is_recr(il) && hparams.n_ff(il) == 0;
                         };
-                    } else if (arch == LLM_ARCH_QWEN3NEXT || arch == LLM_ARCH_QWEN35 || arch == LLM_ARCH_QWEN35MOE || arch == LLM_ARCH_MINIMAX_01 || arch == LLM_ARCH_QWEN4EXP) {
+                    } else if (arch == LLM_ARCH_QWEN3NEXT || arch == LLM_ARCH_QWEN35 || arch == LLM_ARCH_QWEN35MOE || arch == LLM_ARCH_MINIMAX_01 || arch == LLM_ARCH_QWEN4EXP ||
+                               arch == LLM_ARCH_GDN_NSA) {
                         filter_attn = [&](uint32_t il) {
                             return il < hparams.n_layer() && !hparams.is_recr(il);
                         };
@@ -2581,7 +2585,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                             /* model             */ *this,
                             /* attn_type_k       */ params.type_k,
                             /* attn_type_v       */ params.type_v,
-                            /* attn_v_trans      */ !cparams.flash_attn,
+                            /* attn_v_trans      */ !cparams.flash_attn && arch != LLM_ARCH_GDN_NSA, // NSA ops read V as [n_embd_head, n_head_kv, n_kv]
                             /* attn_kv_size      */ cparams.n_ctx_seq,
                             /* attn_n_pad        */ 1,
                             /* attn_n_swa        */ hparams.n_swa,
@@ -2988,6 +2992,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
         case LLM_ARCH_AFMOE:
         case LLM_ARCH_LAGUNA:
         case LLM_ARCH_QWEN3NEXT:
+        case LLM_ARCH_GDN_NSA:
         case LLM_ARCH_MIMO2:
         case LLM_ARCH_STEP35:
         case LLM_ARCH_TALKIE:

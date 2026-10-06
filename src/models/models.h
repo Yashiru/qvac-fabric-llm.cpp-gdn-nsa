@@ -2213,6 +2213,32 @@ struct llama_model_qwen3next : public llama_model_base {
 };
 
 
+struct llama_model_gdn_nsa : public llama_model_base {
+    llama_model_gdn_nsa(const struct llama_model_params & params) : llama_model_base(params) {}
+    void load_arch_hparams(llama_model_loader & ml) override;
+    void load_arch_tensors(llama_model_loader & ml) override;
+
+    struct graph : public llm_build_delta_net_base {
+        graph(const llama_model & model, const llm_graph_params & params);
+    private:
+        ggml_tensor * build_layer_gdn(
+             llm_graph_input_rs * inp,
+                    ggml_tensor * cur,
+                            int   il);
+
+        ggml_tensor * build_layer_nsa(
+        llm_graph_input_attn_kv * inp,
+                    ggml_tensor * cur,
+                    ggml_tensor * inp_pos,
+                            int   il);
+
+        const llama_model & model;
+    };
+
+    std::unique_ptr<llm_graph_context> build_arch_graph(const llm_graph_params & params) const override;
+};
+
+
 struct llama_model_qwen35 : public llama_model_base {
     llama_model_qwen35(const struct llama_model_params & params) : llama_model_base(params) {}
     void load_arch_hparams(llama_model_loader & ml) override;
