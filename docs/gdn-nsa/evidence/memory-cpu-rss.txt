@@ -1,3 +1,4 @@
-CPU F32 (ctx 4096, prompt 1789 + 32 tokens): Maximum resident set size (kbytes): 1500644
-CPU F16 (ctx 4096, prompt 1789 + 32 tokens): Maximum resident set size (kbytes): 804232
-CPU Q4_K_M (ctx 4096, prompt 1789 + 32 tokens): Maximum resident set size (kbytes): 469360
+# /usr/bin/time -v llama-completion (build-cpu, -t 6), final code (build e34ed08eb)
+CPU F32 (ctx 4096, prompt 1789 + 32 tokens): Maximum resident set size (kbytes): 1500616
+CPU F16 (ctx 4096, prompt 1789 + 32 tokens): Maximum resident set size (kbytes): 803832
+CPU Q4_K_M (ctx 4096, prompt 1789 + 32 tokens): Maximum resident set size (kbytes): 469224

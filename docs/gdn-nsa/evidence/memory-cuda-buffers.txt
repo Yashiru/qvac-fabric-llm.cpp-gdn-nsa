@@ -1,4 +1,4 @@
-# gdn-nsa F32, -ngl 99, -c 4096, KV F16 (llama-debug -v)
+# gdn-nsa F32, -ngl 99, -c 4096, KV F16 (llama-debug -v), final code (build e34ed08eb)
 print_backend_buffers_info: offloaded 25/25 layers to GPU
 print_backend_buffers_info:   CPU_Mapped model buffer size =   125.00 MiB
 print_backend_buffers_info:        CUDA0 model buffer size =  1367.01 MiB
@@ -9,4 +9,4 @@ sched_reserve:  CUDA_Host compute buffer size =     4.01 MiB
 sched_reserve: graph splits = 2
 ~llama_context:      CUDA0 compute buffer size is  64.5000 MiB, matches expectation of  64.5000 MiB
 ~llama_context:  CUDA_Host compute buffer size is   4.0137 MiB, matches expectation of   4.0137 MiB
-peak VRAM (process, F16, ctx 4096, prompt 1789 + 128 tokens): 964 MiB
+peak VRAM (process, F16, ctx 4096, prompt 1789 + 128 tokens, nvidia-smi polling): 964 MiB

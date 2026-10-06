@@ -11,8 +11,8 @@ Native Sparse Attention (NSA) is implemented with two new first-class ggml ops, 
   implementation on CPU and on CUDA (RTX 2080 Ti), with no CPU fallback on the GPU path.
 - Logits match an fp32 reference built from the official naive functions with NMSE ~1e-11, and the original
   Triton implementation (run on an Ampere GPU) within its own fp16 noise (top-1 identical, KL ~3e-7).
-- CUDA: 10.6k t/s prompt processing and 280 t/s generation (F16, 512-token prompt); NSA ops take < 5 % of
-  decode time at short context.
+- CUDA: ~9.6k t/s prompt processing and ~256 t/s generation (F16, 512-token prompt, runs vary by up to ~10 %);
+  NSA ops take < 5 % of decode time at short context.
 
 ## Requirements of the assignment
 
@@ -27,6 +27,27 @@ Native Sparse Attention (NSA) is implemented with two new first-class ggml ops, 
 | bonus | Quantization | done (Q8_0, Q4_K_M, F16) | [quality](evidence/quality-quantization.txt) |
 | bonus | Other GPU backends (Vulkan, Metal) | not done | NSA ops have CUDA kernels only; on Vulkan they run on CPU ([measured](evidence/vulkan-fallback.txt)) |
 | bonus | Mobile | not done | see [next steps](#limitations-and-next-steps) |
+
+## Quick start
+
+```bash
+# build (CUDA; leave out -DGGML_CUDA=ON for a CPU-only build)
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=ON
+cmake --build build -j --target llama-completion llama-server
+
+# convert (pip install -r requirements/requirements-convert_hf_to_gguf.txt)
+hf download Idiap/gated-deltanet-nsa-0.4B-10B --local-dir models/gated-deltanet-nsa-0.4B-10B
+python convert_hf_to_gguf.py models/gated-deltanet-nsa-0.4B-10B --outtype f16 --outfile models/gdn-nsa-0.4B-F16.gguf
+
+# generate (base model without chat template: plain completion)
+./build/bin/llama-completion -m models/gdn-nsa-0.4B-F16.gguf -ngl 99 -no-cnv --temp 0 -n 24 -p "Hello, my name is"
+
+# server: one sequence per context, so one slot
+./build/bin/llama-server -m models/gdn-nsa-0.4B-F16.gguf -ngl 99 -np 1
+```
+
+`-ngl 99` offloads every layer to the GPU; use `-ngl 0` (or the CPU-only build) to run on CPU.
+[reproduce.sh](reproduce.sh) rebuilds every result of this report.
 
 ## The model
 
@@ -224,35 +245,39 @@ fp16 paths of the Vulkan backend disabled, so the gap comes from Vulkan's fp16 m
 
 Setup: Intel Core i5-13600KF (6 P + 8 E cores, 20 threads), 61 GiB RAM, NVIDIA RTX 2080 Ti 11 GB (sm_75,
 616 GB/s), driver 580.178.04, CUDA 13.3, Linux 7.0. Release builds (`build-cpu`: CPU only, `build-cuda`:
-CUDA, `CMAKE_CUDA_ARCHITECTURES=75`). `llama-bench`, 5 repetitions (GPU) or 3 (CPU), mean +/- std.
+CUDA, `CMAKE_CUDA_ARCHITECTURES=75`). `llama-bench`, 5 repetitions (GPU) or 3 (CPU), mean +/- std, final code
+(build e34ed08eb). The machine is a desktop session (browser and editors open): three CUDA runs within 10
+minutes vary by up to ~10 % (F16 tg128: 251 to 273 t/s), and a run earlier the same day was up to 10 % faster
+([spread](evidence/bench-cuda-variance.md)). The tables show the run saved by `reproduce.sh bench`.
 
 ### CUDA (-ngl 99)
 
 | weights | size | pp512 (t/s) | tg128 (t/s) |
 |---|---:|---:|---:|
-| F32 | 1.43 GB | 7230 +/- 232 | 209 +/- 8 |
-| F16 | 718 MB | 10584 +/- 434 | 280 +/- 7 |
-| Q8_0 | 382 MB | 9444 +/- 176 | 338 +/- 8 |
-| Q4_K_M | 225 MB | 9160 +/- 168 | 371 +/- 11 |
+| F32 | 1.43 GB | 6341 +/- 359 | 200 +/- 9 |
+| F16 | 718 MB | 9646 +/- 393 | 256 +/- 12 |
+| Q8_0 | 382 MB | 8992 +/- 615 | 316 +/- 10 |
+| Q4_K_M | 225 MB | 8218 +/- 645 | 335 +/- 13 |
 
 ### CPU
 
 | weights | pp512, 20 threads | tg128, 6 threads |
 |---|---:|---:|
-| F32 | 539 +/- 5 | 15.9 +/- 0.8 |
-| F16 | 466 +/- 1 | 31.0 +/- 0.2 |
-| Q8_0 | 479 +/- 4 | 49.6 +/- 1.4 |
-| Q4_K_M | 638 +/- 5 | 65.8 +/- 1.5 |
+| F32 | 563 +/- 9 | 14.0 +/- 0.6 |
+| F16 | 494 +/- 15 | 28.9 +/- 1.1 |
+| Q8_0 | 455 +/- 10 | 47.6 +/- 2.0 |
+| Q4_K_M | 579 +/- 17 | 67.3 +/- 4.3 |
 
-Generation is fastest with 6 threads (P cores); 12 and 20 threads are slower (E cores, synchronization).
+Generation is fastest with 6 threads (P cores); 12 and 20 threads are slower (E cores, synchronization),
+except F32 where 6 and 12 threads are within noise.
 Full table with 6/12/20 threads: [bench-cpu.md](evidence/bench-cpu.md).
 
 ### Generation vs context depth (F16)
 
 | depth | 0 | 512 | 1024 | 2048 | 3584 |
 |---|---:|---:|---:|---:|---:|
-| CUDA tg64 (t/s) | 283 | 241 | 223 | 210 | 194 |
-| CPU tg32, 6 threads (t/s) | 25.7 | - | 24.1 | 22.0 | 20.1 |
+| CUDA tg64 (t/s) | 271 | 239 | 219 | 204 | 181 |
+| CPU tg32, 6 threads (t/s) | 28.4 | - | 24.1 | 21.6 | 19.2 |
 
 ### Memory
 
@@ -281,11 +306,12 @@ activations.
 
 ### Generation is bound by weight reads plus a fixed per-token cost
 
-A fit over the four weight types gives `t_token = 2.28 ms + weight_bytes / 595 GB/s` (616 GB/s theoretical).
-It predicts 287 t/s for F16 (measured 280-283) and 342 t/s for Q8_0 (338). F32 is dominated by weight reads
-(2.4 of 4.7 ms); Q4_K_M by the fixed cost of ~630 small kernels per token. At depth 0, NSA (both ops, argsort
+A fit over the four weight types gives `t_token = 2.59 ms + weight_bytes / 584 GB/s` (616 GB/s theoretical);
+each of the four runs gives 2.3 to 2.9 ms and 565 to 640 GB/s, with every prediction within 3 % of its own
+measurement ([spread](evidence/bench-cuda-variance.md)). F32 is dominated by weight reads (2.4 of 5.0 ms);
+Q4_K_M by the fixed cost of ~630 small kernels per token (2.6 of 3.0 ms). At depth 0, NSA (both ops, argsort
 and block means) is ~4.6 % of GPU time ([profiles](evidence/profile-summary.md)). On CPU, F32 and F16 read
-~22 GB/s of weights: also memory bound.
+~20 GB/s of weights: also memory bound.
 
 ### What grows with the context
 
@@ -330,7 +356,6 @@ of one coalesced read. It was reverted.
   CPUs were not tested.
 - `ggml_l2_norm` computes `x / max(||x||, eps)`, fla uses `x / sqrt(sum x^2 + 1e-6)`: identical except for
   near-zero vectors.
-- The CUDA kernel comments follow a line-by-line style, more verbose than the repository guidelines.
 
 ## Use of AI
 
