@@ -1,0 +1,6 @@
+# test-backend-ops perf -o NSA_CMP / NSA_SEL -b CUDA0 (RTX 2080 Ti): one NSA layer of the model, 4096 cached keys
+# n_tokens=1: decode, n_tokens=512: prefill. GB/s counts the full K/V tensors, not the keys the sparse ops read.
+  NSA_CMP(hs=64,nh=32,nh_kv=2,n_tokens=1,n_kv=4096,bs=64):             57344 runs -    17.59 us/run -       80 kB/run -    4.36 GB/s
+  NSA_CMP(hs=64,nh=32,nh_kv=2,n_tokens=512,n_kv=4096,bs=64):                    7884 runs -   253.20 us/run -     8514 kB/run -   32.07 GB/s
+  NSA_SEL(type_k=f16,type_v=f16,hs=64,nh=32,nh_kv=2,n_tokens=1,n_kv=4096,n_sel=16,bs=64,window=512,idx_view=1):                24573 runs -    53.49 us/run -     2072 kB/run -   36.95 GB/s
+  NSA_SEL(type_k=f16,type_v=f16,hs=64,nh=32,nh_kv=2,n_tokens=512,n_kv=4096,n_sel=16,bs=64,window=512,idx_view=1):               2300 runs -  6033.76 us/run -    14593 kB/run -    2.31 GB/s

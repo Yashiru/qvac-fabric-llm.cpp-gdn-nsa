@@ -1,0 +1,10 @@
+# ./docs/gdn-nsa/reproduce.sh vulkan (build-vulkan, same RTX 2080 Ti through Vulkan; cmake output removed)
+=== vulkan
+using device Vulkan0 (NVIDIA GeForce RTX 2080 Ti) (0000:01:00.0) - 9375 MiB free
+graph splits = 50
+nodes not on Vulkan0:
+     12 CPU NSA_CMP
+     12 CPU NSA_SEL
+      1 CPU GET_ROWS
+vulkan (KV F32) vs ref fp32: positions 1 | max|d| 2.348e-02 | NMSE 1.020e-06 | KL mean 5.268e-06 max 5.268e-06 | top-1 100.00 %
+vulkan, fp16 paths disabled, vs ref fp32: positions 1 | max|d| 1.259e-04 | NMSE 6.564e-11 | KL mean 8.019e-10 max 8.019e-10 | top-1 100.00 %

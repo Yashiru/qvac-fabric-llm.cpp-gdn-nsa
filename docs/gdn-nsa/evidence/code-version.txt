@@ -1,4 +1,5 @@
 Measured code: branch gdn-nsa as of the commit that adds docs/gdn-nsa/ (all code changes are in earlier commits).
+Regenerated or added afterwards (tests.txt, checks.txt, vulkan-fallback.txt, ppl-ctx4096.txt, ops-perf-cuda.txt): same model and kernel code, plus the test cases and comment fixes of the next commits.
 Base: tetherto/qvac-fabric-llm.cpp master 7bb2161c6 (llama.cpp b10549 sync).
 Reference implementation: idiap/hybrid-linear-sparse-attention b786cbc625c0427a5becaa4ff11d9f73ecbf42eb.
 Checkpoint: Idiap/gated-deltanet-nsa-0.4B-10B, model.safetensors sha256 409ac2b3ff67b9b529e85be1f7f2a59c28ab8f03f78777caf379d009e3c27986.

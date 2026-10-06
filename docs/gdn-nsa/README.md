@@ -22,10 +22,10 @@ Native Sparse Attention (NSA) is implemented with two new first-class ggml ops, 
 | 2 | Real output on CPU | done | greedy text and logits below, [comparisons](evidence/reference-and-compare.txt) |
 | 3 | Real output on one GPU backend, no silent CPU fallback | done (CUDA) | [node placement](evidence/placement-cuda.txt), [buffers](evidence/memory-cuda-buffers.txt) |
 | 4 | Validate against the reference, methodology and tolerances | done | [Correctness](#correctness) |
-| 5 | Automated tests and reproducible evidence | done | [tests](evidence/tests.txt), [reproduce.sh](reproduce.sh) |
+| 5 | Automated tests and reproducible evidence | done | [tests](evidence/tests.txt), [other checks](evidence/checks.txt), [reproduce.sh](reproduce.sh) |
 | 6 | CPU/GPU performance, memory, limitations | done | [Performance](#performance), [Limitations](#limitations-and-next-steps) |
 | bonus | Quantization | done (Q8_0, Q4_K_M, F16) | [quality](evidence/quality-quantization.txt) |
-| bonus | Other GPU backends (Vulkan, Metal) | not done | NSA ops have CUDA kernels only |
+| bonus | Other GPU backends (Vulkan, Metal) | not done | NSA ops have CUDA kernels only; on Vulkan they run on CPU ([measured](evidence/vulkan-fallback.txt)) |
 | bonus | Mobile | not done | see [next steps](#limitations-and-next-steps) |
 
 ## The model
@@ -62,7 +62,7 @@ Branch `gdn-nsa`, on top of tetherto/qvac-fabric-llm.cpp master `7bb2161c6`.
 | Conversion | `conversion/gdn_nsa.py`, `conversion/__init__.py`, `gguf-py/gguf/constants.py`, `gguf_writer.py` | HF -> GGUF, new keys `attention.nsa.{block_size,block_count,window_size}` |
 | Model | `src/models/gdn-nsa.cpp`, `src/models/models.h`, `src/llama-arch.*`, `src/llama-hparams.h`, `src/llama-model.cpp`, `src/llama-context.cpp`, `src/llama-model-saver.cpp` | arch `gdn-nsa`, hparams, tensors, graph, hybrid memory |
 | Shared fix | `src/llama-graph.cpp` | skip the KQ mask in the hybrid memory input when the graph does not use it |
-| Tests | `tests/test-backend-ops.cpp`, `tests/test-llama-archs.cpp` | 24 NSA op cases, synthetic gdn-nsa model |
+| Tests | `tests/test-backend-ops.cpp`, `tests/test-llama-archs.cpp` | 30 NSA op cases and 4 perf cases, synthetic gdn-nsa model |
 | Reference tools | `examples/model-conversion/scripts/causal/run-org-model-gdn-nsa*.py`, `compare-logits-gdn-nsa.py` | fp32 CPU reference, original implementation runner, logits comparison |
 
 ### NSA as two ggml ops
@@ -147,6 +147,10 @@ Last-token logits, 1789-token prompt, F32 weights:
 | CUDA, KV F32 | original implementation | 3.4e-3 | 1.0e-8 | 2.8e-7 | same |
 | CPU, KV F32 | original implementation | 3.4e-3 | - | 2.9e-7 | same |
 
+Other configurations against the fp32 reference ([checks](evidence/checks.txt)): CPU KV F16 1.1e-3 / NMSE
+2.0e-9; K and V caches of different types (F16/F32, CPU and CUDA) NMSE <= 1.8e-9; ubatch 37, 100 and 1789
+(whole prompt in one ubatch) on CUDA, same 1.3e-4 as ubatch 512.
+
 Reference vs original implementation:
 
 | comparison | positions | max abs diff | KL mean / max | top-1 |
@@ -167,21 +171,42 @@ Perplexity, wikitext-2, n_ctx 2048, 2 chunks, KV F32:
 | llama.cpp CPU | 11.5905 | 12.9163 |
 | llama.cpp CUDA | 11.5906 | 12.9163 |
 
+At the training context length (n_ctx 4096, 1 chunk, KV F32): fp32 reference 13.1127, llama.cpp CPU and CUDA
+13.1128 ([ppl-ctx4096](evidence/ppl-ctx4096.txt)). The original implementation was not run at 4096.
+
 Greedy generation, 24 tokens, prompt "Hello, my name is": identical token ids in the original implementation,
 the fp32 reference, llama.cpp CPU and llama.cpp CUDA:
 "Dr. R.A.S. and I am a 3rd year medical student at the University of California,".
 
+### Other checks
+
+From `reproduce.sh checks` ([output](evidence/checks.txt)):
+
+- Determinism: two CUDA runs give bitwise identical logits, and so do CPU runs with 1 and 7 threads (the NSA
+  kernels use a fixed reduction order and no atomics).
+- State save/load: `llama-completion --prompt-cache` (`llama_state_*`) reproduces the greedy text of a run
+  without cache byte for byte, for a full and for a partial (275 of 278 tokens) reuse of the saved session.
+- Speculative decoding (`llama-speculative-simple`, Q4_K_M draft): same text as greedy decoding. The hybrid
+  memory cannot drop a suffix, so llama.cpp rolls back with checkpoints; the draft was always accepted (100 %),
+  so this rollback path was not exercised.
+- Guards: `llama-server` with its default of 4 slots fails with "gdn-nsa supports one sequence at a time
+  (n_seq_max = 4, must be 1)"; `-np 1` works. A q8_0 KV cache is refused with a clear message.
+
 ### Automated tests
 
-- `test-backend-ops -o NSA_CMP` (10 cases) and `-o NSA_SEL` (14 cases), CUDA vs CPU: decode (1 token) and
+- `test-backend-ops -o NSA_CMP` (10 cases) and `-o NSA_SEL` (20 cases), CUDA vs CPU: decode (1 token) and
   prefill (7, 64, 512 tokens), cache sizes at block edges (1, 63, 64, 65) and 1000/4096, KV F32 and F16,
-  head size 64 and 128, GQA 16 and 4. `NSA_CMP` overrides `err()` to compare finite values only (otherwise
-  `inf - inf = NaN` and `NaN > threshold` is false, the test could not fail). `NSA_SEL` draws its block indices
-  itself (distinct, ~10 % set to -1), so it does not depend on top-k.
-- Mutation check: removing the q scaling in the CUDA `nsa_cmp` kernel fails 6/10 cases; shifting the window by
-  one key in `nsa_sel` fails 10/14 cases (the others cannot see the bug: 0 or 1 visible block, window covering
-  the whole cache).
-- `test-llama-archs -a gdn-nsa`: random-weight model, consistency and save/load round trip, OK on CPU.
+  K and V of different types, head size 64 and 128, GQA 16 and 4. `NSA_CMP` overrides `err()` to compare
+  finite values only (otherwise `inf - inf = NaN` and `NaN > threshold` is false, the test could not fail).
+  `NSA_SEL` draws its block indices itself (distinct, ~10 % set to -1), so it does not depend on top-k; 4 cases
+  pass them as a strided view (16 of 64 columns), the layout `ggml_argsort_top_k` gives in the model.
+- Mutation check: removing the q scaling in the CUDA `nsa_cmp` kernel fails 6/10 cases; starting the window
+  one key early in `nsa_sel` fails 16/20 cases (the 4 others have a window covering the whole cache); reading
+  the indices as contiguous rows in `nsa_sel` fails exactly the 4 strided cases.
+- `test-llama-archs -a gdn-nsa` (CUDA build): random-weight model, CUDA vs CPU logits NMSE ~5e-8 (threshold
+  1e-4) and GGUF save/load round trip.
+- `test-backend-ops perf -o NSA_CMP` / `-o NSA_SEL`: one layer at the model shapes, 4096 cached keys, decode
+  and 512-token prefill ([CUDA](evidence/ops-perf-cuda.txt)).
 - `reproduce.sh compare`: end-to-end logits check with an NMSE threshold.
 
 ### No CPU fallback on CUDA
@@ -189,6 +214,11 @@ the fp32 reference, llama.cpp CPU and llama.cpp CUDA:
 `-ngl 99`: 25/25 layers offloaded, `graph splits = 2`. With `GGML_SCHED_DEBUG=2`, the only CPU node is the
 token embedding `GET_ROWS` (input layer, standard in llama.cpp); all other nodes run on CUDA0, including the
 12 `NSA_CMP`, 12 `NSA_SEL`, 12 `ARGSORT`, 12 `GATED_DELTA_NET` ([placement](evidence/placement-cuda.txt)).
+
+For comparison, a Vulkan build on the same GPU (`reproduce.sh vulkan`, [output](evidence/vulkan-fallback.txt))
+has `graph splits = 50`: the scheduler runs the 12 `NSA_CMP` and 12 `NSA_SEL` on CPU, which is what a
+fallback looks like. The result is still correct: NMSE 1.0e-6 against the fp32 reference, 6.6e-11 with the
+fp16 paths of the Vulkan backend disabled, so the gap comes from Vulkan's fp16 math, not from the NSA ops.
 
 ## Performance
 
@@ -280,18 +310,24 @@ of one coalesced read. It was reverted.
 - One sequence per context. The NSA ops take "cache cell j holds position j", true for a single sequence
   filled from position 0. Context creation refuses `n_seq_max > 1` and KV cache types other than F16/F32, and
   the KV cache shift is disabled for gdn-nsa, so unsupported setups fail with a clear message (for example
-  `llama-perplexity` with `-b > -c`, or parallel slots in llama-server). Supporting several sequences needs the
-  position of each cache cell passed to the ops.
+  `llama-perplexity` with `-b > -c`). `llama-server` must be started with `-np 1`: its default is 4 slots,
+  which is refused. Supporting several sequences needs the position of each cache cell passed to the ops.
 - Block means are recomputed over the whole cache at each step (as in the reference): O(n_kv) per NSA layer and
   token. An incremental cache of the means (a block only changes until it is complete) would remove it.
 - `nsa_sel` does not share K/V between the 16 query heads of a group (the extra reads mostly hit L2). Next: a
   shared-memory K/V tile per (token, KV head) loaded once for the 16 heads, and split-K for long windows in
   decode.
-- CUDA only. On Vulkan or Metal, `supports_op` would be false for the NSA ops and the scheduler would run them
-  on CPU (visible as extra graph splits, not silent). The kernels are simple (no tensor cores, F32 math) and
-  would port to a Vulkan compute shader for Adreno/Mali.
-- `nsa_cmp` uses `G x n_blk` floats of shared memory: up to ~49k tokens of context with G = 16. The model was
-  trained with 4096 tokens; longer contexts are untested.
+- CUDA only. On Vulkan the NSA ops run on CPU (measured above: 50 graph splits instead of 2); Metal and the
+  other backends would do the same. The kernels are simple (no tensor cores, F32 math) and would port to a
+  Vulkan compute shader for Adreno/Mali.
+- `nsa_cmp` uses `G x n_blk` floats of shared memory: up to ~49k tokens of context with G = 16, beyond which
+  CUDA `supports_op` is false and `NSA_CMP` runs on CPU. The model was trained with 4096 tokens (checked above);
+  longer contexts are untested.
+- No backward for the NSA ops: training and fine-tuning (for example LoRA) are not supported for this model.
+- Test coverage: `test-backend-ops` compares a backend to the CPU, so a CPU-only CI skips the NSA cases, and
+  the CPU kernels are checked only end to end against the Python reference, which needs torch and the
+  checkpoint and is not part of ctest. The speculative decoding rollback path, multi-GPU, RPC, Metal and non-x86
+  CPUs were not tested.
 - `ggml_l2_norm` computes `x / max(||x||, eps)`, fla uses `x / sqrt(sum x^2 + 1e-6)`: identical except for
   near-zero vectors.
 - The CUDA kernel comments follow a line-by-line style, more verbose than the repository guidelines.
@@ -309,6 +345,7 @@ implementation on a cloud GPU), reviewed the changes commit by commit and made e
 ```bash
 export HF_DIR=models/gated-deltanet-nsa-0.4B-10B GGUF_DIR=models/gguf WIKI=data/wikitext-2-raw/wiki.test.raw
 ./docs/gdn-nsa/reproduce.sh build convert reference compare tests ppl placement bench
+./docs/gdn-nsa/reproduce.sh ppl4096 vulkan checks   # optional: n_ctx 4096, Vulkan build, other checks
 ./docs/gdn-nsa/reproduce.sh official   # prints the commands for the original implementation (Ampere+ GPU)
 ```
 
