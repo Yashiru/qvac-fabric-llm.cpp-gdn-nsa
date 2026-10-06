@@ -1,0 +1,46 @@
+/workspace/hlsa/fla/modules/convolution.py:593: UserWarning: The `backend` parameter is set to `cuda`, but `causal_conv1d_fn` is not available. Switching to the Triton implementation instead. Consider installing `causal_conv1d` to enable the CUDA backend.
+  warnings.warn(
+The attention mask and the pad token id were not set. As a consequence, you may observe unexpected behavior. Please pass your input's `attention_mask` to obtain reliable results.
+Setting `pad_token_id` to `eos_token_id`:2 for open-end generation.
+The attention mask is not set and cannot be inferred from input because pad token is same as eos token. As a consequence, you may observe unexpected behavior. Please pass your input's `attention_mask` to obtain reliable results.
+{
+ "torch": "2.7.0+cu128",
+ "gpu": "NVIDIA A40",
+ "dtype": "torch.float32",
+ "triton": "3.3.0",
+ "flash_attn": "2.8.3",
+ "transformers": "4.49.0",
+ "fla_commit": "b786cbc625c0427a5becaa4ff11d9f73ecbf42eb",
+ "n_tokens": 1789,
+ "greedy_tokens": [
+  2985,
+  28723,
+  399,
+  28723,
+  28741,
+  28723,
+  28735,
+  28723,
+  304,
+  315,
+  837,
+  264,
+  28705,
+  28770,
+  5240,
+  879,
+  5714,
+  5716,
+  438,
+  272,
+  2900,
+  302,
+  6247,
+  28725
+ ],
+ "greedy_text": "<s> Hello, my name is Dr. R.A.S. and I am a 3rd year medical student at the University of California,",
+ "ppl": [
+  11.590535604287838,
+  12.916657267499287
+ ]
+}

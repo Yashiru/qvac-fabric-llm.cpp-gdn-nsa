@@ -1,0 +1,41 @@
+{
+ "torch": "2.7.0+cu128",
+ "gpu": "NVIDIA A40",
+ "dtype": "torch.float32",
+ "triton": "3.3.0",
+ "flash_attn": "2.8.3",
+ "transformers": "4.49.0",
+ "fla_commit": "b786cbc625c0427a5becaa4ff11d9f73ecbf42eb",
+ "n_tokens": 1789,
+ "greedy_tokens": [
+  2985,
+  28723,
+  399,
+  28723,
+  28741,
+  28723,
+  28735,
+  28723,
+  304,
+  315,
+  837,
+  264,
+  28705,
+  28770,
+  5240,
+  879,
+  5714,
+  5716,
+  438,
+  272,
+  2900,
+  302,
+  6247,
+  28725
+ ],
+ "greedy_text": "<s> Hello, my name is Dr. R.A.S. and I am a 3rd year medical student at the University of California,",
+ "ppl": [
+  11.590535604287838,
+  12.916657267499287
+ ]
+}
