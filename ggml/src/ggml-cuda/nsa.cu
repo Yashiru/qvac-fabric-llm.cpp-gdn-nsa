@@ -243,7 +243,7 @@ void ggml_cuda_op_nsa_cmp(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
 
     const dim3   grid(n_head_kv, n_tokens);                  // 1 bloc CUDA par couple (tete kv, token)
     const dim3   block(G * WARP_SIZE);                       // 1 warp par tete q du groupe : 512 threads pour G = 16
-    const size_t smem = (size_t) G * n_blk * sizeof(float);  // G lignes de probas, 7 Ko pour G = 16 et 28 blocs
+    const size_t smem = (size_t) G * n_blk * sizeof(float);  // G lignes de probas : 1.75 Ko pour G = 16 et 28 blocs
     cudaStream_t stream = ctx.stream();                      // flux du backend : ordre garanti avec les ops voisines
 
     const float * q_d  = (const float *) q->data;       // pointeur device des requetes
@@ -346,7 +346,7 @@ bool ggml_cuda_nsa_supported(const ggml_tensor * op) {  // false : le scheduler 
     }
     if (op->op == GGML_OP_NSA_CMP) {  // NSA_CMP : contraintes de types et de SMEM propres a nsa_cmp_kernel
         const bool f32 = k->type == GGML_TYPE_F32 && v->type == GGML_TYPE_F32;  // moyennes de blocs produites en F32
-        return f32 && G * k->ne[2] * sizeof(float) <= 48 * 1024;                // SMEM statique max sans opt-in : 48 Ko
+        return f32 && G * k->ne[2] * sizeof(float) <= 48 * 1024;                // SMEM dynamique max sans opt-in : 48 Ko par bloc
     }
     const bool k_ok = k->type == GGML_TYPE_F16 || k->type == GGML_TYPE_F32;  // instances nsa_sel : cache F16 ou F32
     const bool v_ok = v->type == GGML_TYPE_F16 || v->type == GGML_TYPE_F32;  // cache V : F16 ou F32, type independant de celui de K
