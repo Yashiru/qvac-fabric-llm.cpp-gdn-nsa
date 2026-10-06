@@ -1306,7 +1306,8 @@ bool llama_kv_cache::get_can_shift() const {
     // Step35 uses per-layer RoPE dims; K-shift assumes a single global n_rot.
     const int n_pos_per_embd = hparams.n_pos_per_embd();
 
-    return model.arch != LLM_ARCH_STEP35 &&
+    // gdn-nsa: NSA ops need key j at position j, a shift would break it
+    return model.arch != LLM_ARCH_STEP35 && model.arch != LLM_ARCH_GDN_NSA &&
         (n_pos_per_embd <= 1 ||
          (n_pos_per_embd == 4 && llama_kv_cache_uses_mrope_shift(hparams)));
 }
