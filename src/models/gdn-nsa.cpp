@@ -290,7 +290,8 @@ ggml_tensor * llama_model_gdn_nsa::graph::build_layer_nsa(
             n_blk*sizeof(float), n_blk*n_head_kv_l*sizeof(float), n_embd_head_k*n_head_l*n_tokens*sizeof(float));
     cb(scores, "nsa_scores", il);
 
-    ggml_tensor * idx = ggml_top_k(ctx0, scores, std::min<int64_t>(hparams.nsa_block_count, n_blk));
+    // argsort + view: one kernel for all rows (CUDA ggml_top_k launches one CUB top-k per row)
+    ggml_tensor * idx = ggml_argsort_top_k(ctx0, scores, std::min<int64_t>(hparams.nsa_block_count, n_blk));
     cb(idx, "nsa_idx", il);
 
     ggml_tensor * sel = ggml_nsa_sel(ctx0, q, k_all, v_all, idx, inp_pos, bs, hparams.nsa_window_size, kq_scale);

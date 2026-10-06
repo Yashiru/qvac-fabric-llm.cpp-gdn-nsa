@@ -6806,7 +6806,7 @@ struct ggml_tensor * ggml_nsa_sel(
     GGML_ASSERT(ggml_is_contiguous_rows(q));
     GGML_ASSERT(ggml_is_contiguous_rows(k));
     GGML_ASSERT(ggml_is_contiguous_rows(v));
-    GGML_ASSERT(ggml_is_contiguous(idx));
+    GGML_ASSERT(ggml_is_contiguous_rows(idx));
     GGML_ASSERT(k->ne[0] == q->ne[0] && v->ne[0] == q->ne[0]);
     GGML_ASSERT(v->ne[1] == k->ne[1] && v->ne[2] == k->ne[2]);
     GGML_ASSERT(q->ne[1] % k->ne[1] == 0);
