@@ -1,0 +1,22 @@
+# ./docs/gdn-nsa/reproduce.sh checks (F32 weights, 1789-token prompt, last-token logits vs the fp32 reference; KV F32 unless stated)
+=== checks
+cpu-kvf16 (-ngl 0 -ctk f16 -ctv f16) vs ref fp32: positions 1 | max|d| 1.079e-03 | NMSE 2.044e-09 | KL mean 8.489e-08 max 8.489e-08 | top-1 100.00 %
+cpu-k16v32 (-ngl 0 -ctk f16 -ctv f32) vs ref fp32: positions 1 | max|d| 9.437e-04 | NMSE 1.648e-09 | KL mean 2.633e-08 max 2.633e-08 | top-1 100.00 %
+cuda-k16v32 (-ngl 99 -ctk f16 -ctv f32) vs ref fp32: positions 1 | max|d| 9.742e-04 | NMSE 1.826e-09 | KL mean 7.732e-08 max 7.732e-08 | top-1 100.00 %
+cuda-k32v16 (-ngl 99 -ctk f32 -ctv f16) vs ref fp32: positions 1 | max|d| 5.305e-04 | NMSE 5.620e-10 | KL mean 2.890e-09 max 2.890e-09 | top-1 100.00 %
+cuda-ub37 (-ngl 99 -ub 37) vs ref fp32: positions 1 | max|d| 1.283e-04 | NMSE 6.341e-11 | KL mean 7.756e-10 max 7.756e-10 | top-1 100.00 %
+cuda-ub100 (-ngl 99 -ub 100) vs ref fp32: positions 1 | max|d| 1.264e-04 | NMSE 6.366e-11 | KL mean 7.827e-10 max 7.827e-10 | top-1 100.00 %
+cuda-ub1789 (-ngl 99 -ub 1789) vs ref fp32: positions 1 | max|d| 1.276e-04 | NMSE 6.523e-11 | KL mean 8.080e-10 max 8.080e-10 | top-1 100.00 %
+cuda-run1 (-ngl 99) vs ref fp32: positions 1 | max|d| 1.286e-04 | NMSE 6.318e-11 | KL mean 7.529e-10 max 7.529e-10 | top-1 100.00 %
+cuda-run2 (-ngl 99) vs ref fp32: positions 1 | max|d| 1.286e-04 | NMSE 6.318e-11 | KL mean 7.529e-10 max 7.529e-10 | top-1 100.00 %
+cpu-t1 (-ngl 0 -t 1) vs ref fp32: positions 1 | max|d| 9.298e-05 | NMSE 1.998e-11 | KL mean 2.762e-10 max 2.762e-10 | top-1 100.00 %
+cpu-t7 (-ngl 0 -t 7) vs ref fp32: positions 1 | max|d| 9.298e-05 | NMSE 1.998e-11 | KL mean 2.762e-10 max 2.762e-10 | top-1 100.00 %
+cuda-run1 vs cuda-run2: bitwise identical
+cpu-t1 vs cpu-t7: bitwise identical
+session file matches 275 / 278 tokens of prompt
+p1: output with saved session identical
+p2: output with saved session identical
+speculative 'Hello, my name is': accept    = 100.000%, 280 chars compared, same text as greedy
+speculative 'The history of the Roman Empire': accept    = 100.000%, 308 chars compared, same text as greedy
+gdn-nsa supports one sequence at a time (n_seq_max = 4, must be 1)
+gdn-nsa requires an F16 or F32 KV cache (got q8_0)

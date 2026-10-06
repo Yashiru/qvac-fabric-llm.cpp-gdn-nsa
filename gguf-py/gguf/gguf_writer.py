@@ -807,6 +807,15 @@ class GGUFWriter:
         key = Keys.Attention.Indexer.TYPES.format(arch=self.arch)
         self.add_array(key, value)
 
+    def add_nsa_block_size(self, block_size: int) -> None:
+        self.add_uint32(Keys.Attention.NSA.BLOCK_SIZE.format(arch=self.arch), block_size)
+
+    def add_nsa_block_count(self, block_count: int) -> None:
+        self.add_uint32(Keys.Attention.NSA.BLOCK_COUNT.format(arch=self.arch), block_count)
+
+    def add_nsa_window_size(self, window_size: int) -> None:
+        self.add_uint32(Keys.Attention.NSA.WINDOW_SIZE.format(arch=self.arch), window_size)
+
     def add_max_alibi_bias(self, bias: float) -> None:
         self.add_float32(Keys.Attention.MAX_ALIBI_BIAS.format(arch=self.arch), bias)
 

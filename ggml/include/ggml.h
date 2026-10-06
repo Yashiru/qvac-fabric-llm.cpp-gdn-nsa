@@ -589,6 +589,8 @@ extern "C" {
         GGML_OP_GATED_DELTA_NET,
         GGML_OP_GATED_DELTA_NET_BACK,
         GGML_OP_LIGHTNING_INDEXER,
+        GGML_OP_NSA_CMP,
+        GGML_OP_NSA_SEL,
         GGML_OP_DSV4_HC_COMB,
         GGML_OP_DSV4_HC_PRE,
         GGML_OP_DSV4_HC_POST,
@@ -2712,6 +2714,50 @@ extern "C" {
         struct ggml_tensor  * k,
         struct ggml_tensor  * weights,
         struct ggml_tensor  * mask);
+
+    // Native Sparse Attention (NSA), compressed branch and block scores
+    //
+    // q     : [D, n_head,    n_tokens] F32
+    // k_cmp : [D, n_head_kv, n_blk]    F32 - mean of each block of block_size keys
+    // v_cmp : [D, n_head_kv, n_blk]    F32
+    // pos   : [n_tokens]               I32 - position t of each query
+    //
+    // query at position t attends to the complete blocks c < (t + 1)/block_size
+    // result is 1D and packs two planes:
+    //   o_cmp  : [D, n_head, n_tokens]
+    //   scores : [n_blk, n_head_kv, n_tokens] - softmax probs summed over the q heads of the kv head,
+    //            +INF for blocks 0, t/block_size and t/block_size - 1, -INF for the other blocks not visible
+    GGML_API struct ggml_tensor * ggml_nsa_cmp(
+            struct ggml_context * ctx,
+            struct ggml_tensor  * q,
+            struct ggml_tensor  * k_cmp,
+            struct ggml_tensor  * v_cmp,
+            struct ggml_tensor  * pos,
+            int                   block_size,
+            float                 scale);
+
+    // NSA selected blocks and sliding window branches
+    //
+    // q   : [D, n_head,    n_tokens]        F32
+    // k   : [D, n_head_kv, n_kv]            F32 or F16 - key j is at position j
+    // v   : [D, n_head_kv, n_kv]            F32 or F16
+    // idx : [n_sel, n_head_kv, n_tokens]    I32 - selected block indices, < 0 to skip
+    // pos : [n_tokens]                      I32
+    //
+    // result: [D, n_head, n_tokens, 2]
+    //   plane 0: attention over the keys of the selected blocks
+    //   plane 1: attention over the keys in [t - window + 1, t]
+    // keys after t are skipped
+    GGML_API struct ggml_tensor * ggml_nsa_sel(
+            struct ggml_context * ctx,
+            struct ggml_tensor  * q,
+            struct ggml_tensor  * k,
+            struct ggml_tensor  * v,
+            struct ggml_tensor  * idx,
+            struct ggml_tensor  * pos,
+            int                   block_size,
+            int                   window,
+            float                 scale);
 
     // DeepSeek V4 hyper-connections (ref. https://arxiv.org/pdf/2512.24880)
     // In short these operations are replacements for the original residual connection (x = transformer(x) + x)

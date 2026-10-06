@@ -1,0 +1,10 @@
+Final code: build e34ed08eb (the commits after it change only comments and documentation).
+Measured on the final code: bench-*.md, memory-*.txt, tests.txt, checks.txt, vulkan-fallback.txt, ppl-ctx4096.txt, ops-perf-cuda.txt.
+Measured earlier the same day, from the working tree before the code was split into commits: reference-and-compare.txt,
+placement-cuda.txt, quality-quantization.txt, profile-summary.md, tokenizer-check.txt, official-run.*. The KV F32 logits
+comparisons of reference-and-compare.txt are reproduced on the final code by checks.txt (cuda-run1, cpu-t1: same values).
+Base: tetherto/qvac-fabric-llm.cpp master 7bb2161c6 (llama.cpp b10549 sync).
+Reference implementation: idiap/hybrid-linear-sparse-attention b786cbc625c0427a5becaa4ff11d9f73ecbf42eb.
+Checkpoint: Idiap/gated-deltanet-nsa-0.4B-10B, model.safetensors sha256 409ac2b3ff67b9b529e85be1f7f2a59c28ab8f03f78777caf379d009e3c27986.
+Hardware: Intel Core i5-13600KF, 61 GiB RAM, NVIDIA RTX 2080 Ti 11 GB (driver 580.178.04, CUDA 13.3), Linux 7.0.0-38.
+Original implementation run: NVIDIA A40 (RunPod), torch 2.7.0+cu128, triton 3.3.0, flash-attn 2.8.3, transformers 4.49.0.

@@ -9402,6 +9402,158 @@ struct test_lightning_indexer : public test_case {
     }
 };
 
+// GGML_OP_NSA_CMP
+// queries are the last n_tokens positions of a cache of n_kv keys
+struct test_nsa_cmp : public test_case {
+    const int64_t hs;
+    const int64_t nh;
+    const int64_t nh_kv;
+    const int64_t n_tokens;
+    const int64_t n_kv;
+    const int     bs;
+
+    std::string vars() override {
+        return VARS_TO_STR6(hs, nh, nh_kv, n_tokens, n_kv, bs);
+    }
+
+    double max_nmse_err() override {
+        return 1e-6;
+    }
+
+    // scores of forced and not visible blocks are +-INF (sign checked by the caller): compare the finite values
+    double err(const float * a, const float * b, size_t n) override {
+        std::vector<float> fa;
+        std::vector<float> fb;
+        for (size_t i = 0; i < n; i++) {
+            if (std::isfinite(a[i]) && std::isfinite(b[i])) {
+                fa.push_back(a[i]);
+                fb.push_back(b[i]);
+            }
+        }
+        return nmse(fa.data(), fb.data(), fa.size());
+    }
+
+    test_nsa_cmp(int64_t hs = 64, int64_t nh = 32, int64_t nh_kv = 2, int64_t n_tokens = 1, int64_t n_kv = 1000, int bs = 64)
+        : hs(hs), nh(nh), nh_kv(nh_kv), n_tokens(n_tokens), n_kv(n_kv), bs(bs) {}
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        const int64_t n_blk = (n_kv + bs - 1)/bs;
+
+        ggml_tensor * q     = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, hs, nh,    n_tokens);
+        ggml_tensor * k_cmp = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, hs, nh_kv, n_blk);
+        ggml_tensor * v_cmp = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, hs, nh_kv, n_blk);
+        ggml_tensor * pos   = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, n_tokens);
+        ggml_set_name(pos, "pos");
+
+        ggml_tensor * out = ggml_nsa_cmp(ctx, q, k_cmp, v_cmp, pos, bs, 1.0f/sqrtf(hs));
+        ggml_set_name(out, "out");
+
+        return out;
+    }
+
+    void initialize_tensors(ggml_context * ctx) override {
+        for (ggml_tensor * t = ggml_get_first_tensor(ctx); t != NULL; t = ggml_get_next_tensor(ctx, t)) {
+            if (strcmp(t->name, "pos") == 0) {
+                std::vector<int32_t> data(n_tokens);
+                for (int64_t i = 0; i < n_tokens; i++) {
+                    data[i] = n_kv - n_tokens + i;
+                }
+                ggml_backend_tensor_set(t, data.data(), 0, n_tokens*sizeof(int32_t));
+            } else {
+                init_tensor_uniform(t);
+            }
+        }
+    }
+};
+
+// GGML_OP_NSA_SEL
+// random distinct block indices per (token, kv head), some set to -1
+// idx_view: idx is the first n_sel columns of a [n_blk, nh_kv, n_tokens] tensor, like ggml_argsort_top_k in the model
+struct test_nsa_sel : public test_case {
+    const ggml_type type_k;
+    const ggml_type type_v;
+    const int64_t hs;
+    const int64_t nh;
+    const int64_t nh_kv;
+    const int64_t n_tokens;
+    const int64_t n_kv;
+    const int64_t n_sel;
+    const int     bs;
+    const int     window;
+    const bool    idx_view;
+
+    std::string vars() override {
+        return VARS_TO_STR11(type_k, type_v, hs, nh, nh_kv, n_tokens, n_kv, n_sel, bs, window, idx_view);
+    }
+
+    double max_nmse_err() override {
+        return 1e-6;
+    }
+
+    test_nsa_sel(ggml_type type_k = GGML_TYPE_F16, ggml_type type_v = GGML_TYPE_F16, int64_t hs = 64, int64_t nh = 32,
+            int64_t nh_kv = 2, int64_t n_tokens = 1, int64_t n_kv = 1000, int64_t n_sel = 16, int bs = 64, int window = 512,
+            bool idx_view = false)
+        : type_k(type_k), type_v(type_v), hs(hs), nh(nh), nh_kv(nh_kv), n_tokens(n_tokens), n_kv(n_kv), n_sel(n_sel),
+          bs(bs), window(window), idx_view(idx_view) {}
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        const int64_t n_blk = (n_kv + bs - 1)/bs;
+
+        ggml_tensor * q   = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, hs, nh,    n_tokens);
+        ggml_tensor * k   = ggml_new_tensor_3d(ctx, type_k,        hs, nh_kv, n_kv);
+        ggml_tensor * v   = ggml_new_tensor_3d(ctx, type_v,        hs, nh_kv, n_kv);
+        ggml_tensor * idx = ggml_new_tensor_3d(ctx, GGML_TYPE_I32, idx_view ? n_blk : n_sel, nh_kv, n_tokens);
+        ggml_tensor * pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, n_tokens);
+        ggml_set_name(idx, "idx");
+        ggml_set_name(pos, "pos");
+
+        if (idx_view) {
+            idx = ggml_view_3d(ctx, idx, n_sel, nh_kv, n_tokens, idx->nb[1], idx->nb[2], 0);
+        }
+
+        ggml_tensor * out = ggml_nsa_sel(ctx, q, k, v, idx, pos, bs, window, 1.0f/sqrtf(hs));
+        ggml_set_name(out, "out");
+
+        return out;
+    }
+
+    void initialize_tensors(ggml_context * ctx) override {
+        std::random_device rd;
+        std::default_random_engine rng(rd());
+
+        const int64_t n_blk = (n_kv + bs - 1)/bs;
+
+        for (ggml_tensor * t = ggml_get_first_tensor(ctx); t != NULL; t = ggml_get_next_tensor(ctx, t)) {
+            if (t->view_src != nullptr) {
+                continue; // the idx view shares the data of idx
+            }
+            if (strcmp(t->name, "pos") == 0) {
+                std::vector<int32_t> data(n_tokens);
+                for (int64_t i = 0; i < n_tokens; i++) {
+                    data[i] = n_kv - n_tokens + i;
+                }
+                ggml_backend_tensor_set(t, data.data(), 0, n_tokens*sizeof(int32_t));
+            } else if (strcmp(t->name, "idx") == 0) {
+                // full rows: n_sel columns, or n_blk with idx_view (the op must only read the first n_sel)
+                const int64_t n_col = t->ne[0];
+                std::vector<int32_t> blocks(n_blk);
+                std::vector<int32_t> data(n_col*nh_kv*n_tokens);
+                for (int64_t r = 0; r < nh_kv*n_tokens; r++) {
+                    std::iota(blocks.begin(), blocks.end(), 0);
+                    std::shuffle(blocks.begin(), blocks.end(), rng);
+                    for (int64_t s = 0; s < n_col; s++) {
+                        const bool skip = s >= n_blk || rng() % 10 == 0;
+                        data[r*n_col + s] = skip ? -1 : blocks[s];
+                    }
+                }
+                ggml_backend_tensor_set(t, data.data(), 0, data.size()*sizeof(int32_t));
+            } else {
+                init_tensor_uniform(t);
+            }
+        }
+    }
+};
+
 // Deserializable generic test case
 struct input_tensor {
     ggml_type type;
@@ -12328,6 +12480,31 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
         }
     }
 
+    for (int64_t n_kv : { 1, 63, 64, 65, 1000, 4096 }) {
+        test_cases.emplace_back(new test_nsa_cmp(64, 32, 2, 1, n_kv));
+    }
+    for (int64_t n_tokens : { 7, 64, 512 }) {
+        test_cases.emplace_back(new test_nsa_cmp(64, 32, 2, n_tokens, 1000));
+    }
+    test_cases.emplace_back(new test_nsa_cmp(128, 16, 4, 33, 300, 32));
+
+    for (ggml_type type_kv : { GGML_TYPE_F32, GGML_TYPE_F16 }) {
+        for (int64_t n_kv : { 1, 65, 1000, 4096 }) {
+            test_cases.emplace_back(new test_nsa_sel(type_kv, type_kv, 64, 32, 2, 1, n_kv, std::min<int64_t>(16, (n_kv + 63)/64)));
+        }
+        for (int64_t n_tokens : { 7, 512 }) {
+            test_cases.emplace_back(new test_nsa_sel(type_kv, type_kv, 64, 32, 2, n_tokens, 1000));
+        }
+        test_cases.emplace_back(new test_nsa_sel(type_kv, type_kv, 128, 16, 4, 33, 300, 8, 32, 100));
+        // idx as a strided view (64 blocks per row, 16 read), as produced by ggml_argsort_top_k
+        for (int64_t n_tokens : { 1, 64 }) {
+            test_cases.emplace_back(new test_nsa_sel(type_kv, type_kv, 64, 32, 2, n_tokens, 4096, 16, 64, 512, true));
+        }
+    }
+    // K and V caches of different types (-ctk f16 -ctv f32)
+    test_cases.emplace_back(new test_nsa_sel(GGML_TYPE_F16, GGML_TYPE_F32, 64, 32, 2, 7, 1000));
+    test_cases.emplace_back(new test_nsa_sel(GGML_TYPE_F32, GGML_TYPE_F16, 64, 32, 2, 7, 1000));
+
     for (ggml_type type : {GGML_TYPE_MXFP4, GGML_TYPE_NVFP4}) {
         test_cases.emplace_back(new test_repacked_mul_mat(type, 256, 1, 512));
         test_cases.emplace_back(new test_repacked_mul_mat(type, 256, 256, 512));
@@ -12802,6 +12979,12 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
     // does not tell you how the op scales
     test_cases.emplace_back(new test_gated_delta_net_back(GGML_TYPE_F32, 32, 64, 512, 1));  // d64 PP-512
     test_cases.emplace_back(new test_gated_delta_net_back(GGML_TYPE_F32, 32, 32, 512, 1));  // d32 PP-512
+
+    // NSA at the shapes of Idiap/gated-deltanet-nsa-0.4B-10B (one layer): decode and prefill-512 at 4096 cached keys
+    for (int64_t n_tokens : { 1, 512 }) {
+        test_cases.emplace_back(new test_nsa_cmp(64, 32, 2, n_tokens, 4096));
+        test_cases.emplace_back(new test_nsa_sel(GGML_TYPE_F16, GGML_TYPE_F16, 64, 32, 2, n_tokens, 4096, 16, 64, 512, true));
+    }
 
     // lightning_indexer
     for (int kv : { 256, 4096, 65536 }) {

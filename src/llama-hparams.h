@@ -250,6 +250,11 @@ struct llama_hparams {
     uint32_t indexer_n_head    = 0;
     uint32_t indexer_head_size = 0;
     uint32_t indexer_top_k     = 0;
+
+    // native sparse attention (gdn-nsa)
+    uint32_t nsa_block_size  = 0;
+    uint32_t nsa_block_count = 0;
+    uint32_t nsa_window_size = 0;
     // MSA
     uint32_t indexer_block_size  = 0;
     uint32_t indexer_local_blocks = 0;

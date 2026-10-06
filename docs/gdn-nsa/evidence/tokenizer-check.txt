@@ -1,0 +1,2 @@
+prompt long (6500 chars): HF 1789 tokens, llama.cpp 1789 tokens, identical = True
+wiki.test.raw: HF 328880 tokens, llama.cpp 328880 tokens, identical = True

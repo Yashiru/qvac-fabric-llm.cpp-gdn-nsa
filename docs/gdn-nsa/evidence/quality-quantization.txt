@@ -1,0 +1,28 @@
+# Perplexity, full wikitext-2 test set, n_ctx 2048, 160 chunks, KV cache F16, CUDA
+F32: Final estimate: PPL = 12.8898 +/- 0.08874
+F16: Final estimate: PPL = 12.8908 +/- 0.08874
+Q8_0: Final estimate: PPL = 12.8938 +/- 0.08878
+Q4_K_M: Final estimate: PPL = 13.0337 +/- 0.08948
+
+# KL divergence vs F32, 20 chunks of 2048 (llama-perplexity --kl-divergence)
+## F16
+chunk             PPL               ln(PPL(Q)/PPL(base))          KL Divergence              Δp RMS            Same top p
+Mean PPL(Q)/PPL(base)         :   1.000778 ±   0.000279
+Mean    KLD:   0.000074 ±   0.000001
+Maximum KLD:   0.015254
+99.0%   KLD:   0.000445
+Same top p: 99.365 ± 0.056 %
+## Q8_0
+chunk             PPL               ln(PPL(Q)/PPL(base))          KL Divergence              Δp RMS            Same top p
+Mean PPL(Q)/PPL(base)         :   1.000853 ±   0.000364
+Mean    KLD:   0.000280 ±   0.000040
+Maximum KLD:   0.812812
+99.0%   KLD:   0.001274
+Same top p: 99.115 ± 0.065 %
+## Q4_K_M
+chunk             PPL               ln(PPL(Q)/PPL(base))          KL Divergence              Δp RMS            Same top p
+Mean PPL(Q)/PPL(base)         :   1.011356 ±   0.001123
+Mean    KLD:   0.010023 ±   0.000102
+Maximum KLD:   0.682478
+99.0%   KLD:   0.058892
+Same top p: 94.467 ± 0.160 %

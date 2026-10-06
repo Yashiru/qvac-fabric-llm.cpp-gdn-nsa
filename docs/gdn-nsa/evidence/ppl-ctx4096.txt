@@ -1,0 +1,5 @@
+# ./docs/gdn-nsa/reproduce.sh ppl4096 (wikitext-2 test, n_ctx 4096, 1 chunk, KV F32)
+=== ppl4096
+build-cpu: Final estimate: PPL = 13.1128 +/- 0.75689
+build-cuda: Final estimate: PPL = 13.1128 +/- 0.75689
+fp32 reference: Final estimate: PPL = 13.1127

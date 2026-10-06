@@ -2402,6 +2402,7 @@ uint32_t llama_context::graph_max_nodes(uint32_t n_tokens) const {
         // the n_tokens*40 budget below is exhausted at ubatch 3840
         res = std::max<uint32_t>(n_tokens * 160, 64u * model.n_tensors());
     } else if (model.arch == LLM_ARCH_QWEN3NEXT ||
+        model.arch == LLM_ARCH_GDN_NSA ||
         model.arch == LLM_ARCH_KIMI_LINEAR ||
         model.arch == LLM_ARCH_BAILINGMOE3 ||
         model.arch == LLM_ARCH_QWEN35 ||
@@ -3896,6 +3897,20 @@ llama_context * llama_init_from_model(
         if (params.flash_attn_type != LLAMA_FLASH_ATTN_TYPE_ENABLED) {
             LLAMA_LOG_ERROR("%s: SPLIT_MODE_TENSOR requires flash_attn to be enabled\n", __func__);
             return nullptr;
+        }
+    }
+
+    // NSA ops need key j at position j (one sequence, cells filled from 0) and read K/V as F16 or F32
+    if (model->arch == LLM_ARCH_GDN_NSA) {
+        if (params.n_seq_max > 1) {
+            LLAMA_LOG_ERROR("%s: gdn-nsa supports one sequence at a time (n_seq_max = %u, must be 1)\n", __func__, params.n_seq_max);
+            return nullptr;
+        }
+        for (const ggml_type type : { params.type_k, params.type_v }) {
+            if (type != GGML_TYPE_F16 && type != GGML_TYPE_F32) {
+                LLAMA_LOG_ERROR("%s: gdn-nsa requires an F16 or F32 KV cache (got %s)\n", __func__, ggml_type_name(type));
+                return nullptr;
+            }
         }
     }
 
